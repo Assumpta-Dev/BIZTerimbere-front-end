@@ -1,10 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { economicApi, analyticsApi, alertsApi } from "../api/services";
 import {
   RiStockLine, RiMapPinLine, RiGlobalLine, RiUserStarLine,
   RiLightbulbLine, RiScalesLine, RiArrowUpLine, RiArrowDownLine,
-  RiCheckLine, RiBox3Line, RiLoader4Line,
+  RiCheckLine, RiBox3Line, RiLoader4Line, RiSearchLine,
 } from "react-icons/ri";
+import CollectionFooter from "../components/CollectionFooter";
+import { normalizeText, paginateItems, sortItems } from "../utils/collection";
 
 const currency = (value: number) =>
   new Intl.NumberFormat("en-RW", { style: "currency", currency: "RWF", maximumFractionDigits: 0 }).format(value);
@@ -30,6 +32,17 @@ export default function Analytics() {
   const [alerts, setAlerts] = useState<any[]>([]);
   const [categoryBreakdown, setCategoryBreakdown] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [suggestionSearch, setSuggestionSearch] = useState("");
+  const [suggestionUrgency, setSuggestionUrgency] = useState("");
+  const [suggestionSortBy, setSuggestionSortBy] = useState<"urgency" | "currentSellingPrice" | "suggestedIdealPrice" | "productName">("urgency");
+  const [suggestionSortDir, setSuggestionSortDir] = useState<"asc" | "desc">("asc");
+  const [suggestionPage, setSuggestionPage] = useState(1);
+  const [suggestionLimit, setSuggestionLimit] = useState(6);
+  const [categorySortBy, setCategorySortBy] = useState<"revenue" | "quantity" | "name">("revenue");
+  const [categorySortDir, setCategorySortDir] = useState<"asc" | "desc">("desc");
+  const [categoryPage, setCategoryPage] = useState(1);
+  const [categoryLimit, setCategoryLimit] = useState(5);
+  const [alertSortDir, setAlertSortDir] = useState<"asc" | "desc">("desc");
 
   useEffect(() => {
     Promise.all([
@@ -54,6 +67,47 @@ export default function Analytics() {
       setCategoryBreakdown(cats.data.data ?? []);
     }).catch(console.error).finally(() => setLoading(false));
   }, []);
+
+  const processedSuggestions = useMemo(() => {
+    const urgencyRank: Record<string, number> = { high: 0, medium: 1, low: 2 };
+    const filtered = priceSuggestions
+      .filter((item) => (suggestionUrgency ? item.urgency === suggestionUrgency : true))
+      .filter((item) => {
+        if (!suggestionSearch) return true;
+        return [item.productName, item.category, item.status].map(normalizeText).join(" ").includes(normalizeText(suggestionSearch));
+      });
+
+    const accessor = (item: any) => {
+      if (suggestionSortBy === "urgency") return urgencyRank[item.urgency] ?? 99;
+      return item[suggestionSortBy];
+    };
+
+    return sortItems(filtered, accessor, suggestionSortDir);
+  }, [priceSuggestions, suggestionUrgency, suggestionSearch, suggestionSortBy, suggestionSortDir]);
+  const pagedSuggestions = useMemo(
+    () => paginateItems(processedSuggestions, suggestionPage, suggestionLimit),
+    [processedSuggestions, suggestionPage, suggestionLimit]
+  );
+  const processedCategories = useMemo(() => {
+    const accessor = (item: any) => item[categorySortBy];
+    return sortItems(categoryBreakdown, accessor, categorySortDir);
+  }, [categoryBreakdown, categorySortBy, categorySortDir]);
+  const pagedCategories = useMemo(
+    () => paginateItems(processedCategories, categoryPage, categoryLimit),
+    [processedCategories, categoryPage, categoryLimit]
+  );
+  const processedAlerts = useMemo(
+    () => sortItems(alerts, (item) => item.createdAt, alertSortDir),
+    [alerts, alertSortDir]
+  );
+
+  useEffect(() => {
+    setSuggestionPage(1);
+  }, [suggestionSearch, suggestionUrgency, suggestionSortBy, suggestionSortDir, suggestionLimit]);
+
+  useEffect(() => {
+    setCategoryPage(1);
+  }, [categorySortBy, categorySortDir, categoryLimit]);
 
   if (loading) return <Spinner />;
 
@@ -173,14 +227,22 @@ export default function Analytics() {
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#0E514F]/50">Suggestions</p>
               <h2 className="text-xl font-bold text-slate-900 mt-0.5">Action queue</h2>
             </div>
-            <div className="w-9 h-9 rounded-xl bg-[#FFF5B3] flex items-center justify-center text-[#0E514F]">
-              <RiLightbulbLine className="text-lg" />
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setAlertSortDir((dir) => dir === "asc" ? "desc" : "asc")}
+                className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs font-semibold text-slate-600"
+              >
+                {alertSortDir === "asc" ? "Oldest" : "Newest"}
+              </button>
+              <div className="w-9 h-9 rounded-xl bg-[#FFF5B3] flex items-center justify-center text-[#0E514F]">
+                <RiLightbulbLine className="text-lg" />
+              </div>
             </div>
           </div>
           <div className="space-y-3 flex-1">
-            {alerts.length === 0 ? (
+            {processedAlerts.length === 0 ? (
               <p className="text-sm text-slate-400 text-center py-8">No active suggestions</p>
-            ) : alerts.map((alert: any) => (
+            ) : processedAlerts.map((alert: any) => (
               <div key={alert.id} className="flex items-start gap-3 p-3.5 rounded-xl bg-slate-50 border border-slate-100">
                 <div className="w-8 h-8 rounded-lg bg-[#0E514F] flex items-center justify-center text-white shrink-0 mt-0.5">
                   {alert.type === "PRICE_SUGGESTION" ? <RiScalesLine className="text-sm" /> : <RiBox3Line className="text-sm" />}
@@ -212,13 +274,37 @@ export default function Analytics() {
             </div>
             <RiUserStarLine className="text-2xl text-[#0E514F]" />
           </div>
+          <div className="grid gap-2 mb-4 sm:grid-cols-3">
+            <select
+              value={categorySortBy}
+              onChange={(e) => setCategorySortBy(e.target.value as "revenue" | "quantity" | "name")}
+              className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none focus:border-[#0E514F]"
+            >
+              <option value="revenue">Sort: Revenue</option>
+              <option value="quantity">Sort: Units</option>
+              <option value="name">Sort: Name</option>
+            </select>
+            <button
+              onClick={() => setCategorySortDir((dir) => dir === "asc" ? "desc" : "asc")}
+              className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-600"
+            >
+              {categorySortDir === "asc" ? "Asc" : "Desc"}
+            </button>
+            <select
+              value={categoryLimit}
+              onChange={(e) => setCategoryLimit(Number(e.target.value))}
+              className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none focus:border-[#0E514F]"
+            >
+              {[4, 5, 8].map((option) => <option key={option} value={option}>{option}/page</option>)}
+            </select>
+          </div>
           <div className="space-y-3">
-            {categoryBreakdown.length === 0 ? (
+            {pagedCategories.items.length === 0 ? (
               <p className="text-sm text-slate-400 text-center py-6">No sales data yet</p>
-            ) : categoryBreakdown.slice(0, 5).map((cat: any, i: number) => (
+            ) : pagedCategories.items.map((cat: any, i: number) => (
               <div key={cat.categoryId} className="flex items-center gap-4 p-4 rounded-xl bg-slate-50">
                 <div className="w-9 h-9 rounded-xl bg-[#0E514F] text-white flex items-center justify-center text-xs font-bold shrink-0">
-                  0{i + 1}
+                  {String((pagedCategories.meta.page - 1) * pagedCategories.meta.limit + i + 1).padStart(2, "0")}
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold text-slate-800 truncate">{cat.name}</p>
@@ -233,6 +319,15 @@ export default function Analytics() {
               </div>
             ))}
           </div>
+          <CollectionFooter
+            page={pagedCategories.meta.page}
+            totalPages={pagedCategories.meta.totalPages}
+            total={pagedCategories.meta.total}
+            limit={categoryLimit}
+            onPageChange={setCategoryPage}
+            onLimitChange={setCategoryLimit}
+            limitOptions={[4, 5, 8]}
+          />
         </div>
 
         <div className="rounded-2xl border border-slate-100 bg-white p-6 shadow-sm">
@@ -244,7 +339,7 @@ export default function Analytics() {
             <RiGlobalLine className="text-2xl text-[#0E514F]" />
           </div>
           <div className="space-y-4">
-            {categoryBreakdown.slice(0, 4).map((cat: any) => (
+            {processedCategories.slice(0, 4).map((cat: any) => (
               <div key={cat.categoryId} className="rounded-xl bg-slate-50 p-4">
                 <div className="flex items-center justify-between mb-2.5">
                   <div className="flex items-center gap-2">
@@ -280,6 +375,50 @@ export default function Analytics() {
             <RiScalesLine /> Smart pricing frame
           </div>
         </div>
+        <div className="px-6 py-4 border-b border-slate-100 grid gap-3 lg:grid-cols-[1.5fr_repeat(4,minmax(0,1fr))]">
+          <div className="relative">
+            <RiSearchLine className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              value={suggestionSearch}
+              onChange={(e) => setSuggestionSearch(e.target.value)}
+              placeholder="Search product or category"
+              className="w-full rounded-xl border border-slate-200 bg-slate-50 pl-9 pr-3 py-2.5 text-sm outline-none focus:border-[#0E514F]"
+            />
+          </div>
+          <select
+            value={suggestionUrgency}
+            onChange={(e) => setSuggestionUrgency(e.target.value)}
+            className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-[#0E514F]"
+          >
+            <option value="">All urgency</option>
+            <option value="high">High</option>
+            <option value="medium">Medium</option>
+            <option value="low">Low</option>
+          </select>
+          <select
+            value={suggestionSortBy}
+            onChange={(e) => setSuggestionSortBy(e.target.value as "urgency" | "currentSellingPrice" | "suggestedIdealPrice" | "productName")}
+            className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-[#0E514F]"
+          >
+            <option value="urgency">Sort: Urgency</option>
+            <option value="productName">Sort: Product</option>
+            <option value="currentSellingPrice">Sort: Current</option>
+            <option value="suggestedIdealPrice">Sort: Ideal</option>
+          </select>
+          <button
+            onClick={() => setSuggestionSortDir((dir) => dir === "asc" ? "desc" : "asc")}
+            className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-semibold text-slate-600"
+          >
+            {suggestionSortDir === "asc" ? "Asc" : "Desc"}
+          </button>
+          <select
+            value={suggestionLimit}
+            onChange={(e) => setSuggestionLimit(Number(e.target.value))}
+            className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-[#0E514F]"
+          >
+            {[6, 10, 15].map((option) => <option key={option} value={option}>{option}/page</option>)}
+          </select>
+        </div>
         <div className="overflow-x-auto">
           <table className="min-w-full">
             <thead>
@@ -293,9 +432,9 @@ export default function Analytics() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
-              {priceSuggestions.length === 0 ? (
+              {pagedSuggestions.items.length === 0 ? (
                 <tr><td colSpan={6} className="px-5 py-8 text-center text-sm text-slate-400">No price data yet</td></tr>
-              ) : priceSuggestions.map((item: any) => (
+              ) : pagedSuggestions.items.map((item: any) => (
                 <tr key={item.productId} className="hover:bg-slate-50 transition-colors">
                   <td className="px-5 py-4">
                     <p className="text-sm font-semibold text-slate-800">{item.productName}</p>
@@ -316,6 +455,15 @@ export default function Analytics() {
             </tbody>
           </table>
         </div>
+        <CollectionFooter
+          page={pagedSuggestions.meta.page}
+          totalPages={pagedSuggestions.meta.totalPages}
+          total={pagedSuggestions.meta.total}
+          limit={suggestionLimit}
+          onPageChange={setSuggestionPage}
+          onLimitChange={setSuggestionLimit}
+          limitOptions={[6, 10, 15]}
+        />
       </div>
     </div>
   );

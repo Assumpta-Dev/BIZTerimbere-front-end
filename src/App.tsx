@@ -12,6 +12,7 @@ import Analytics from "./pages/Analytics";
 import Reports from "./pages/Reports";
 import Settings from "./pages/Settings";
 import Logout from "./pages/Logout";
+import Alerts from "./pages/Alerts";
 
 function AppLayout() {
   return (
@@ -25,6 +26,7 @@ function AppLayout() {
           <Route path="analytics" element={<Analytics />} />
           <Route path="reports" element={<Reports />} />
           <Route path="settings" element={<Settings />} />
+          <Route path="alerts" element={<Alerts />} />
           <Route path="logout" element={<Logout />} />
           <Route index element={<Navigate to="dashboard" replace />} />
           <Route path="*" element={<Navigate to="dashboard" replace />} />

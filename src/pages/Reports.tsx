@@ -1,11 +1,13 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { analyticsApi, salesApi } from "../api/services";
 import { presentationSlides } from "../data/data";
 import {
   RiFileTextLine, RiPrinterLine, RiDownloadLine, RiCheckLine,
   RiStackLine, RiBarChartBoxLine, RiShieldCheckLine, RiClipboardLine,
-  RiLoader4Line,
+  RiLoader4Line, RiSearchLine,
 } from "react-icons/ri";
+import CollectionFooter from "../components/CollectionFooter";
+import { normalizeText, paginateItems, sortItems } from "../utils/collection";
 
 const currency = (v: number) =>
   new Intl.NumberFormat("en-RW", { style: "currency", currency: "RWF", maximumFractionDigits: 0 }).format(v);
@@ -24,6 +26,15 @@ export default function Reports() {
   const [sales, setSales] = useState<any[]>([]);
   const [exporting, setExporting] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [salesSearch, setSalesSearch] = useState("");
+  const [paymentMode, setPaymentMode] = useState("");
+  const [salesSortBy, setSalesSortBy] = useState<"createdAt" | "totalAmount" | "profit" | "paymentMode">("createdAt");
+  const [salesSortDir, setSalesSortDir] = useState<"asc" | "desc">("desc");
+  const [salesPage, setSalesPage] = useState(1);
+  const [salesLimit, setSalesLimit] = useState(10);
+  const [slidesSortDir, setSlidesSortDir] = useState<"asc" | "desc">("asc");
+  const [slidesPage, setSlidesPage] = useState(1);
+  const [slidesLimit, setSlidesLimit] = useState(4);
 
   useEffect(() => {
     Promise.all([
@@ -63,6 +74,41 @@ export default function Reports() {
       setExporting(false);
     }
   };
+
+  const processedSales = useMemo(() => {
+    const filtered = sales
+      .filter((entry) => (paymentMode ? entry.paymentMode === paymentMode : true))
+      .filter((entry) => {
+        if (!salesSearch) return true;
+        const haystack = [
+          entry.paymentMode,
+          entry.createdAt,
+          entry.totalAmount,
+          ...(entry.items ?? []).map((item: any) => item.product?.name),
+        ].map(normalizeText).join(" ");
+        return haystack.includes(normalizeText(salesSearch));
+      });
+
+    const accessor = (entry: any) => {
+      if (salesSortBy === "profit") return entry.profit;
+      return entry[salesSortBy];
+    };
+
+    return sortItems(filtered, accessor, salesSortDir);
+  }, [sales, paymentMode, salesSearch, salesSortBy, salesSortDir]);
+  const pagedSales = useMemo(() => paginateItems(processedSales, salesPage, salesLimit), [processedSales, salesPage, salesLimit]);
+  const pagedSlides = useMemo(() => {
+    const sorted = sortItems(presentationSlides, (slide) => slide.id, slidesSortDir);
+    return paginateItems(sorted, slidesPage, slidesLimit);
+  }, [slidesPage, slidesLimit, slidesSortDir]);
+
+  useEffect(() => {
+    setSalesPage(1);
+  }, [salesSearch, paymentMode, salesSortBy, salesSortDir, salesLimit]);
+
+  useEffect(() => {
+    setSlidesPage(1);
+  }, [slidesSortDir, slidesLimit]);
 
   if (loading) return <Spinner />;
 
@@ -249,12 +295,20 @@ export default function Reports() {
             <h2 className="text-xl font-bold text-slate-900 mt-0.5">Presentation deck</h2>
             <p className="text-sm text-slate-400 mt-0.5">Document-style story for the product and its impact</p>
           </div>
-          <span className="inline-flex items-center gap-1.5 text-xs font-semibold bg-[#FFF5B3] text-[#0E514F] px-3 py-1.5 rounded-full">
-            <RiStackLine /> {presentationSlides.length} slides
-          </span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setSlidesSortDir((dir) => dir === "asc" ? "desc" : "asc")}
+              className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-600"
+            >
+              {slidesSortDir === "asc" ? "Slide 1-+" : "Newest first"}
+            </button>
+            <span className="inline-flex items-center gap-1.5 text-xs font-semibold bg-[#FFF5B3] text-[#0E514F] px-3 py-1.5 rounded-full">
+              <RiStackLine /> {presentationSlides.length} slides
+            </span>
+          </div>
         </div>
         <div className="grid gap-4 lg:grid-cols-2">
-          {presentationSlides.map((slide) => (
+          {pagedSlides.items.map((slide) => (
             <article key={slide.id}
               className="rounded-xl border border-slate-100 bg-slate-50 p-5 hover:border-[#0E514F]/20 hover:bg-white transition-all">
               <div className="flex items-start justify-between gap-4 mb-4">
@@ -280,6 +334,15 @@ export default function Reports() {
             </article>
           ))}
         </div>
+        <CollectionFooter
+          page={pagedSlides.meta.page}
+          totalPages={pagedSlides.meta.totalPages}
+          total={pagedSlides.meta.total}
+          limit={slidesLimit}
+          onPageChange={setSlidesPage}
+          onLimitChange={setSlidesLimit}
+          limitOptions={[2, 4, 6]}
+        />
       </div>
 
       <div className="rounded-2xl border border-slate-100 bg-white shadow-sm overflow-hidden">
@@ -293,7 +356,53 @@ export default function Reports() {
           </span>
         </div>
 
-        {sales.length === 0 ? (
+        <div className="px-6 py-4 border-b border-slate-100 grid gap-3 lg:grid-cols-[1.4fr_repeat(4,minmax(0,1fr))]">
+          <div className="relative">
+            <RiSearchLine className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              value={salesSearch}
+              onChange={(e) => setSalesSearch(e.target.value)}
+              placeholder="Search sales"
+              className="w-full rounded-xl border border-slate-200 bg-slate-50 pl-9 pr-3 py-2.5 text-sm outline-none focus:border-[#0E514F]"
+            />
+          </div>
+          <select
+            value={paymentMode}
+            onChange={(e) => setPaymentMode(e.target.value)}
+            className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-[#0E514F]"
+          >
+            <option value="">All payments</option>
+            <option value="CASH">Cash</option>
+            <option value="MOBILE_MONEY">Mobile Money</option>
+            <option value="CARD">Card</option>
+            <option value="CREDIT">Credit</option>
+          </select>
+          <select
+            value={salesSortBy}
+            onChange={(e) => setSalesSortBy(e.target.value as "createdAt" | "totalAmount" | "profit" | "paymentMode")}
+            className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-[#0E514F]"
+          >
+            <option value="createdAt">Sort: Date</option>
+            <option value="totalAmount">Sort: Revenue</option>
+            <option value="profit">Sort: Profit</option>
+            <option value="paymentMode">Sort: Payment</option>
+          </select>
+          <button
+            onClick={() => setSalesSortDir((dir) => dir === "asc" ? "desc" : "asc")}
+            className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-semibold text-slate-600"
+          >
+            {salesSortDir === "asc" ? "Asc" : "Desc"}
+          </button>
+          <select
+            value={salesLimit}
+            onChange={(e) => setSalesLimit(Number(e.target.value))}
+            className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-[#0E514F]"
+          >
+            {[10, 15, 20].map((option) => <option key={option} value={option}>{option}/page</option>)}
+          </select>
+        </div>
+
+        {pagedSales.items.length === 0 ? (
           <p className="px-6 py-10 text-sm text-slate-400 text-center">No sales data found for this account yet.</p>
         ) : (
           <div className="overflow-x-auto">
@@ -313,7 +422,7 @@ export default function Reports() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
-                {sales.map((entry: any) => (
+                {pagedSales.items.map((entry: any) => (
                   <tr key={entry.id} className="hover:bg-slate-50 transition-colors">
                     <td className="px-5 py-3.5 text-sm text-slate-600">{new Date(entry.createdAt).toLocaleString()}</td>
                     <td className="px-5 py-3.5 text-sm text-slate-700 font-semibold">{entry.items?.length ?? 0}</td>
@@ -327,6 +436,15 @@ export default function Reports() {
             </table>
           </div>
         )}
+        <CollectionFooter
+          page={pagedSales.meta.page}
+          totalPages={pagedSales.meta.totalPages}
+          total={pagedSales.meta.total}
+          limit={salesLimit}
+          onPageChange={setSalesPage}
+          onLimitChange={setSalesLimit}
+          limitOptions={[10, 15, 20]}
+        />
       </div>
     </div>
   );

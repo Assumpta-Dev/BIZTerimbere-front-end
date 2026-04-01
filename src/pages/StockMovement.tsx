@@ -2,13 +2,15 @@ import { useState, useMemo, useEffect } from "react";
 import {
   RiArrowLeftRightLine, RiArrowUpLine, RiArrowDownLine,
   RiInformationLine, RiAddLine, RiSubtractLine, RiCheckLine,
-  RiArchiveDrawerLine, RiLoader4Line,
+  RiArchiveDrawerLine, RiLoader4Line, RiSearchLine,
 } from "react-icons/ri";
 import { categoriesApi, productsApi, analyticsApi, salesApi } from "../api/services";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, Legend,
 } from "recharts";
+import CollectionFooter from "../components/CollectionFooter";
+import { normalizeText, paginateItems, sortItems } from "../utils/collection";
 
 interface MovementEntry {
   id: string;
@@ -37,28 +39,67 @@ export default function StockMovement() {
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState("");
+  const [productSearch, setProductSearch] = useState("");
+  const [productSortDir, setProductSortDir] = useState<"asc" | "desc">("asc");
+  const [productPage, setProductPage] = useState(1);
+  const [productLimit, setProductLimit] = useState(8);
+  const [logSortDir, setLogSortDir] = useState<"asc" | "desc">("desc");
+  const [logPage, setLogPage] = useState(1);
+  const [logLimit, setLogLimit] = useState(8);
 
   // Load categories + sales chart on mount
   useEffect(() => {
-    Promise.all([
-      categoriesApi.getAll(),
-      analyticsApi.getSalesChart("7d"),
-    ]).then(([cats, chart]) => {
-      const catList = cats.data.data ?? [];
-      setCategories(catList);
-      if (catList.length > 0) setSelectedCategoryId(catList[0].id);
+    const init = async () => {
+      try {
+        const [cats, chart] = await Promise.all([
+          categoriesApi.getAll(),
+          analyticsApi.getSalesChart("7d"),
+        ]);
 
-      // Build chart data from stock logs (use sales chart as proxy for flow)
-      const raw = chart.data.data ?? [];
-      const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-      setChartData(raw.slice(0, 7).map((p: any, i: number) => ({
-        day: days[i] ?? `D${i + 1}`,
-        incoming: Math.round((p.count ?? 0) * 12),
-        outgoing: Math.round((p.count ?? 0) * 18),
-        fifo: Math.round(p.revenue / 1000) || 0,
-        lifo: Math.round(p.revenue / 1200) || 0,
-      })));
-    }).catch(console.error).finally(() => setLoadingInit(false));
+        const catList = cats.data.data ?? [];
+        setCategories(catList);
+
+        // Preload categories until we find one with products so the form is usable immediately.
+        let pickedCategoryId = "";
+        let pickedProductId = "";
+        const preloadMap: Record<string, any[]> = {};
+
+        for (const cat of catList) {
+          const res = await productsApi.getAll({ categoryId: cat.id, limit: 50 });
+          const prods = res.data.data?.products ?? [];
+          preloadMap[cat.id] = prods;
+          if (!pickedCategoryId && prods.length > 0) {
+            pickedCategoryId = cat.id;
+            pickedProductId = prods[0].id;
+          }
+        }
+
+        setProductsByCategory(preloadMap);
+        if (pickedCategoryId) {
+          setSelectedCategoryId(pickedCategoryId);
+          setSelectedProductId(pickedProductId);
+        } else if (catList.length > 0) {
+          setSelectedCategoryId(catList[0].id);
+        }
+
+        // Build chart data from stock logs (use sales chart as proxy for flow)
+        const raw = chart.data.data ?? [];
+        const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+        setChartData(raw.slice(0, 7).map((p: any, i: number) => ({
+          day: days[i] ?? `D${i + 1}`,
+          incoming: Math.round((p.count ?? 0) * 12),
+          outgoing: Math.round((p.count ?? 0) * 18),
+          fifo: Math.round(p.revenue / 1000) || 0,
+          lifo: Math.round(p.revenue / 1200) || 0,
+        })));
+      } catch (e) {
+        console.error(e);
+      } finally {
+        setLoadingInit(false);
+      }
+    };
+
+    init();
   }, []);
 
   // Load products when category changes
@@ -82,9 +123,24 @@ export default function StockMovement() {
     () => productsByCategory[selectedCategoryId] ?? [],
     [productsByCategory, selectedCategoryId]
   );
+  const visibleProducts = useMemo(() => {
+    const filtered = currentProducts.filter((product: any) => {
+      if (!productSearch) return true;
+      return [product.name, product.sku, product.barcode].map(normalizeText).join(" ").includes(normalizeText(productSearch));
+    });
+    return sortItems(filtered, (product) => product.name, productSortDir);
+  }, [currentProducts, productSearch, productSortDir]);
+  const pagedProducts = useMemo(
+    () => paginateItems(visibleProducts, productPage, productLimit),
+    [visibleProducts, productPage, productLimit]
+  );
   const selectedProduct = useMemo(
     () => currentProducts.find((p: any) => p.id === selectedProductId) ?? currentProducts[0],
     [currentProducts, selectedProductId]
+  );
+  const pagedLog = useMemo(
+    () => paginateItems(sortItems(log, (entry) => entry.createdAt, logSortDir), logPage, logLimit),
+    [log, logSortDir, logPage, logLimit]
   );
 
   // Load persistent movement history for selected product
@@ -102,6 +158,14 @@ export default function StockMovement() {
       .catch(() => setLog([]));
   }, [selectedProduct?.id]);
 
+  useEffect(() => {
+    setProductPage(1);
+  }, [selectedCategoryId, productSearch, productSortDir, productLimit]);
+
+  useEffect(() => {
+    setLogPage(1);
+  }, [selectedProduct?.id, logSortDir, logLimit]);
+
   const totalIn = log
     .filter((e) => e.type === "IN" || e.type === "RETURN")
     .reduce((s, e) => s + e.quantity, 0);
@@ -112,6 +176,11 @@ export default function StockMovement() {
 
   const isReady = selectedProduct && quantity > 0 &&
     (movementType === "out" || (manufacturedDate && expiryDate));
+  const disabledReason = !selectedProduct
+    ? "Select a category that has at least one product."
+    : movementType === "in" && (!manufacturedDate || !expiryDate)
+      ? "Choose both manufactured and expiry dates to record stock in."
+      : "";
 
   const handleSubmit = async () => {
     if (!isReady || !selectedProduct) return;
@@ -268,8 +337,33 @@ export default function StockMovement() {
             {currentProducts.length === 0 ? (
               <p className="text-sm text-slate-400 py-4 text-center">No products in this category</p>
             ) : (
-              <div className="grid gap-2 max-h-48 overflow-y-auto">
-                {currentProducts.map((p: any) => (
+              <>
+                <div className="grid gap-2 mb-3 sm:grid-cols-[1fr_auto_auto]">
+                  <div className="relative">
+                    <RiSearchLine className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <input
+                      value={productSearch}
+                      onChange={(e) => setProductSearch(e.target.value)}
+                      placeholder="Search products"
+                      className="w-full rounded-xl border border-slate-200 bg-slate-50 pl-9 pr-3 py-2.5 text-sm outline-none focus:border-[#0E514F]"
+                    />
+                  </div>
+                  <button
+                    onClick={() => setProductSortDir((dir) => dir === "asc" ? "desc" : "asc")}
+                    className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-semibold text-slate-600"
+                  >
+                    {productSortDir === "asc" ? "A-Z" : "Z-A"}
+                  </button>
+                  <select
+                    value={productLimit}
+                    onChange={(e) => setProductLimit(Number(e.target.value))}
+                    className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-[#0E514F]"
+                  >
+                    {[8, 12, 20].map((option) => <option key={option} value={option}>{option}/page</option>)}
+                  </select>
+                </div>
+                <div className="grid gap-2 max-h-48 overflow-y-auto">
+                {pagedProducts.items.map((p: any) => (
                   <button
                     key={p.id}
                     onClick={() => setSelectedProductId(p.id)}
@@ -291,7 +385,18 @@ export default function StockMovement() {
                     </span>
                   </button>
                 ))}
-              </div>
+                </div>
+                <CollectionFooter
+                  page={pagedProducts.meta.page}
+                  totalPages={pagedProducts.meta.totalPages}
+                  total={pagedProducts.meta.total}
+                  limit={productLimit}
+                  onPageChange={setProductPage}
+                  onLimitChange={setProductLimit}
+                  limitOptions={[8, 12, 20]}
+                  label={`${pagedProducts.meta.total} products`}
+                />
+              </>
             )}
           </div>
 
@@ -392,6 +497,9 @@ export default function StockMovement() {
               : movementType === "in" ? <><RiArrowDownLine /> Record Stock In</>
               : <><RiArrowUpLine /> Record Stock Out</>}
           </button>
+          {!isReady && !submitting && !submitted && (
+            <p className="text-xs text-slate-400 text-center">{disabledReason || "Complete the required fields to continue."}</p>
+          )}
         </div>
 
         {/* Chart */}
@@ -437,6 +545,21 @@ export default function StockMovement() {
               {log.length} entries
             </span>
           </div>
+          <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-end gap-2">
+            <button
+              onClick={() => setLogSortDir((dir) => dir === "asc" ? "desc" : "asc")}
+              className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-600"
+            >
+              {logSortDir === "asc" ? "Oldest first" : "Latest first"}
+            </button>
+            <select
+              value={logLimit}
+              onChange={(e) => setLogLimit(Number(e.target.value))}
+              className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none focus:border-[#0E514F]"
+            >
+              {[8, 12, 20].map((option) => <option key={option} value={option}>{option}/page</option>)}
+            </select>
+          </div>
           <div className="overflow-x-auto">
             <table className="min-w-full">
               <thead>
@@ -447,7 +570,7 @@ export default function StockMovement() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
-                {log.map((entry) => (
+                {pagedLog.items.map((entry) => (
                   <tr key={entry.id} className="hover:bg-slate-50 transition-colors">
                     <td className="px-5 py-3.5">
                       <span className={`inline-flex items-center gap-1 text-xs font-bold px-2.5 py-1 rounded-full ${
@@ -469,6 +592,15 @@ export default function StockMovement() {
               </tbody>
             </table>
           </div>
+          <CollectionFooter
+            page={pagedLog.meta.page}
+            totalPages={pagedLog.meta.totalPages}
+            total={pagedLog.meta.total}
+            limit={logLimit}
+            onPageChange={setLogPage}
+            onLimitChange={setLogLimit}
+            limitOptions={[8, 12, 20]}
+          />
         </div>
       )}
     </div>

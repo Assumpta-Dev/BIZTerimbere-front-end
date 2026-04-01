@@ -34,9 +34,26 @@ export const productsApi = {
     search?: string;
     categoryId?: string;
     stockStatus?: string;
+    sortBy?: "updatedAt" | "name" | "quantity" | "sellingPrice" | "expiryDate";
+    sortDir?: "asc" | "desc";
     page?: number;
     limit?: number;
-  }) => api.get("/products", { params }),
+  }) => api.get("/products", { params }).then((res) => {
+    // Backend returns data as Product[] with pagination in meta.
+    if (Array.isArray(res.data?.data)) {
+      return {
+        ...res,
+        data: {
+          ...res.data,
+          data: {
+            products: res.data.data,
+            meta: res.data.meta,
+          },
+        },
+      };
+    }
+    return res;
+  }),
 
   getById: (id: string) => api.get(`/products/${id}`),
 
@@ -92,7 +109,22 @@ export const salesApi = {
     paymentMode?: string;
     page?: number;
     limit?: number;
-  }) => api.get("/sales", { params }),
+  }) => api.get("/sales", { params }).then((res) => {
+    // Backend returns data as Sale[] with pagination in meta.
+    if (Array.isArray(res.data?.data)) {
+      return {
+        ...res,
+        data: {
+          ...res.data,
+          data: {
+            sales: res.data.data,
+            meta: res.data.meta,
+          },
+        },
+      };
+    }
+    return res;
+  }),
 
   getById: (id: string) => api.get(`/sales/${id}`),
 

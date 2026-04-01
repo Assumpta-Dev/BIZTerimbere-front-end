@@ -3,12 +3,16 @@ import {
   RiAlertLine, RiArrowUpLine, RiArrowDownLine,
   RiExchangeDollarLine, RiBarChartLine, RiArrowRightLine,
   RiTimeLine, RiShieldCheckLine, RiStockLine, RiLoader4Line,
+  RiSearchLine,
+  RiCheckDoubleLine, RiDeleteBin6Line,
 } from "react-icons/ri";
-import { analyticsApi, economicApi, alertsApi, productsApi } from "../api/services";
+import { analyticsApi, economicApi, alertsApi, productsApi, categoriesApi } from "../api/services";
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from "recharts";
 import { Link } from "react-router-dom";
+import CollectionFooter from "../components/CollectionFooter";
+import { sortItems } from "../utils/collection";
 
 const priorityColor: Record<string, string> = {
   High: "bg-rose-50 text-rose-600 border border-rose-200",
@@ -47,17 +51,38 @@ export default function Dashboard() {
   const [chartData, setChartData] = useState<any[]>([]);
   const [alerts, setAlerts] = useState<any[]>([]);
   const [products, setProducts] = useState<any[]>([]);
+  const [categories, setCategories] = useState<any[]>([]);
   const [economic, setEconomic] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [loadingProducts, setLoadingProducts] = useState(false);
+  const [loadingAlerts, setLoadingAlerts] = useState(false);
+  const [productMeta, setProductMeta] = useState<{ page: number; totalPages: number; total: number } | null>(null);
+
+  const [stockSearch, setStockSearch] = useState("");
+  const [stockCategoryId, setStockCategoryId] = useState("");
+  const [stockStatus, setStockStatus] = useState("");
+  const [stockSortBy, setStockSortBy] = useState<"name" | "quantity" | "sellingPrice">("name");
+  const [stockSortDir, setStockSortDir] = useState<"asc" | "desc">("asc");
+  const [stockPage, setStockPage] = useState(1);
+  const [stockLimit, setStockLimit] = useState(5);
+
+  const [alertSearch, setAlertSearch] = useState("");
+  const [alertType, setAlertType] = useState("");
+  const [alertUnreadOnly, setAlertUnreadOnly] = useState(false);
+  const [alertPage, setAlertPage] = useState(1);
+  const [alertLimit] = useState(4);
+  const [busyAlertId, setBusyAlertId] = useState<string | null>(null);
+  const [alertSortDir, setAlertSortDir] = useState<"asc" | "desc">("desc");
 
   useEffect(() => {
     Promise.all([
       analyticsApi.getDashboard(),
       analyticsApi.getSalesChart("7d"),
       alertsApi.getAll(),
-      productsApi.getAll({ limit: 5 }),
+      productsApi.getAll({ page: 1, limit: 5 }),
       economicApi.getIndicators(),
-    ]).then(([dash, chart, al, prods, eco]) => {
+      categoriesApi.getAll(),
+    ]).then(([dash, chart, al, prods, eco, cats]) => {
       setDashboard(dash.data.data);
       // Map chart data to {name, value} format
       const raw = chart.data.data ?? [];
@@ -66,11 +91,69 @@ export default function Dashboard() {
         value: p.revenue ?? 0,
         forecast: p.revenue ? Math.round(p.revenue * 0.92) : 0,
       })));
-      setAlerts(al.data.data?.slice(0, 4) ?? []);
+      setAlerts(al.data.data ?? []);
       setProducts(prods.data.data?.products ?? []);
+      setProductMeta(prods.data.data?.meta ?? null);
       setEconomic(eco.data.data);
+      setCategories(cats.data.data ?? []);
     }).catch(console.error).finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    setLoadingProducts(true);
+    productsApi.getAll({
+      search: stockSearch || undefined,
+      categoryId: stockCategoryId || undefined,
+      stockStatus: stockStatus || undefined,
+      sortBy: stockSortBy,
+      sortDir: stockSortDir,
+      page: stockPage,
+      limit: stockLimit,
+    }).then((res) => {
+      setProducts(res.data.data?.products ?? []);
+      setProductMeta(res.data.data?.meta ?? null);
+    }).catch(console.error).finally(() => setLoadingProducts(false));
+  }, [stockSearch, stockCategoryId, stockStatus, stockPage, stockLimit, stockSortBy, stockSortDir]);
+
+  const refreshAlerts = () => {
+    setLoadingAlerts(true);
+    alertsApi.getAll()
+      .then((res) => setAlerts(res.data.data ?? []))
+      .catch(console.error)
+      .finally(() => setLoadingAlerts(false));
+  };
+
+  const filteredAlerts = sortItems(
+    alerts
+    .filter((a: any) => (alertType ? a.type === alertType : true))
+    .filter((a: any) => (alertUnreadOnly ? !a.isRead : true))
+    .filter((a: any) => (alertSearch ? String(a.message).toLowerCase().includes(alertSearch.toLowerCase()) : true)),
+    (alert: any) => alert.createdAt,
+    alertSortDir
+  );
+
+  const pagedAlerts = filteredAlerts.slice((alertPage - 1) * alertLimit, alertPage * alertLimit);
+  const totalAlertPages = Math.max(1, Math.ceil(filteredAlerts.length / alertLimit));
+
+  const markAlertRead = async (id: string) => {
+    setBusyAlertId(id);
+    try {
+      await alertsApi.markRead(id);
+      setAlerts((prev) => prev.map((a: any) => (a.id === id ? { ...a, isRead: true } : a)));
+    } finally {
+      setBusyAlertId(null);
+    }
+  };
+
+  const deleteAlert = async (id: string) => {
+    setBusyAlertId(id);
+    try {
+      await alertsApi.delete(id);
+      setAlerts((prev) => prev.filter((a: any) => a.id !== id));
+    } finally {
+      setBusyAlertId(null);
+    }
+  };
 
   if (loading) return <Spinner />;
 
@@ -175,21 +258,96 @@ export default function Dashboard() {
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#0E514F]/60">Alerts</p>
               <h2 className="text-xl font-bold text-slate-900 mt-0.5">Action queue</h2>
             </div>
-            <span className="text-xs bg-[#FFF5B3] text-[#0E514F] font-semibold px-3 py-1 rounded-full">
-              {alerts.length} items
-            </span>
+            <span className="text-xs bg-[#FFF5B3] text-[#0E514F] font-semibold px-3 py-1 rounded-full">{filteredAlerts.length} items</span>
           </div>
+
+          <div className="grid gap-2 mb-4">
+            <div className="relative">
+              <RiSearchLine className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                value={alertSearch}
+                onChange={(e) => { setAlertSearch(e.target.value); setAlertPage(1); }}
+                placeholder="Search alerts"
+                className="w-full rounded-lg border border-slate-200 bg-slate-50 pl-9 pr-3 py-2 text-xs outline-none focus:border-[#0E514F]"
+              />
+            </div>
+            <div className="flex gap-2">
+              <select
+                value={alertType}
+                onChange={(e) => { setAlertType(e.target.value); setAlertPage(1); }}
+                className="flex-1 rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 text-xs outline-none focus:border-[#0E514F]"
+              >
+                <option value="">All types</option>
+                {Object.keys(priorityColor).filter((k) => k === k.toUpperCase()).map((t) => (
+                  <option key={t} value={t}>{t.replace(/_/g, " ")}</option>
+                ))}
+              </select>
+              <button
+                onClick={() => { setAlertUnreadOnly((v) => !v); setAlertPage(1); }}
+                className={`rounded-lg border px-2 py-2 text-xs font-semibold ${alertUnreadOnly ? "border-[#0E514F] text-[#0E514F] bg-[#0E514F]/5" : "border-slate-200 text-slate-500 bg-slate-50"}`}
+              >
+                Unread only
+              </button>
+              <button
+                onClick={() => { setAlertSortDir((dir) => dir === "asc" ? "desc" : "asc"); setAlertPage(1); }}
+                className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 text-xs font-semibold text-slate-600"
+              >
+                {alertSortDir === "asc" ? "Oldest" : "Newest"}
+              </button>
+            </div>
+          </div>
+
           <div className="space-y-3 flex-1">
-            {alerts.length === 0 ? (
+            {pagedAlerts.length === 0 ? (
               <p className="text-sm text-slate-400 text-center py-8">No active alerts</p>
-            ) : alerts.map((alert) => (
+            ) : pagedAlerts.map((alert: any) => (
               <div key={alert.id} className="flex items-start gap-3 p-3.5 rounded-xl bg-slate-50 border border-slate-100">
                 <span className={`inline-block text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 mt-0.5 ${priorityColor[alert.type] ?? priorityColor.Low}`}>
                   {alert.type?.replace("_", " ")}
                 </span>
-                <p className="text-xs text-slate-600 leading-5">{alert.message}</p>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs text-slate-600 leading-5">{alert.message}</p>
+                  <div className="flex gap-2 mt-2">
+                    {!alert.isRead && (
+                      <button
+                        onClick={() => markAlertRead(alert.id)}
+                        disabled={busyAlertId === alert.id}
+                        className="inline-flex items-center gap-1 text-[10px] font-semibold text-slate-600 hover:underline disabled:opacity-60"
+                      >
+                        <RiCheckDoubleLine /> Mark read
+                      </button>
+                    )}
+                    <button
+                      onClick={() => deleteAlert(alert.id)}
+                      disabled={busyAlertId === alert.id}
+                      className="inline-flex items-center gap-1 text-[10px] font-semibold text-rose-600 hover:underline disabled:opacity-60"
+                    >
+                      <RiDeleteBin6Line /> Delete
+                    </button>
+                  </div>
+                </div>
               </div>
             ))}
+          </div>
+
+          <div className="pt-3 mt-3">
+            <div className="pb-3 text-[11px]">
+              <button
+                onClick={() => { refreshAlerts(); }}
+                disabled={loadingAlerts}
+                className="font-semibold text-[#0E514F] hover:underline disabled:opacity-60"
+              >
+                Refresh
+              </button>
+            </div>
+            <CollectionFooter
+              page={alertPage}
+              totalPages={totalAlertPages}
+              total={filteredAlerts.length}
+              limit={alertLimit}
+              onPageChange={setAlertPage}
+              label={`Page ${alertPage} of ${totalAlertPages}`}
+            />
           </div>
         </div>
       </div>
@@ -205,8 +363,61 @@ export default function Dashboard() {
             View all <RiArrowRightLine />
           </Link>
         </div>
+
+        <div className="px-6 py-3 border-b border-slate-100 grid gap-2 md:grid-cols-5">
+          <div className="md:col-span-2 relative">
+            <RiSearchLine className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              value={stockSearch}
+              onChange={(e) => { setStockSearch(e.target.value); setStockPage(1); }}
+              placeholder="Search stock..."
+              className="w-full rounded-lg border border-slate-200 bg-slate-50 pl-9 pr-3 py-2 text-xs outline-none focus:border-[#0E514F]"
+            />
+          </div>
+          <select
+            value={stockCategoryId}
+            onChange={(e) => { setStockCategoryId(e.target.value); setStockPage(1); }}
+            className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 text-xs outline-none focus:border-[#0E514F]"
+          >
+            <option value="">All categories</option>
+            {categories.map((c: any) => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
+          <select
+            value={stockStatus}
+            onChange={(e) => { setStockStatus(e.target.value); setStockPage(1); }}
+            className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 text-xs outline-none focus:border-[#0E514F]"
+          >
+            <option value="">All status</option>
+            <option value="low">Low</option>
+            <option value="out">Out</option>
+            <option value="expiring">Expiring</option>
+            <option value="expired">Expired</option>
+          </select>
+          <div className="flex gap-2">
+            <select
+              value={stockSortBy}
+              onChange={(e) => setStockSortBy(e.target.value as "name" | "quantity" | "sellingPrice")}
+              className="flex-1 rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 text-xs outline-none focus:border-[#0E514F]"
+            >
+              <option value="name">Name</option>
+              <option value="quantity">Qty</option>
+              <option value="sellingPrice">Price</option>
+            </select>
+            <button
+              onClick={() => setStockSortDir((d) => d === "asc" ? "desc" : "asc")}
+              className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 text-xs font-semibold text-slate-600"
+            >
+              {stockSortDir === "asc" ? "Asc" : "Desc"}
+            </button>
+          </div>
+        </div>
+
         <div className="divide-y divide-slate-50">
-          {products.length === 0 ? (
+          {loadingProducts ? (
+            <div className="h-[160px] flex items-center justify-center"><RiLoader4Line className="text-2xl text-[#0E514F] animate-spin" /></div>
+          ) : products.length === 0 ? (
             <p className="text-sm text-slate-400 text-center py-8">No products yet</p>
           ) : products.map((item: any) => {
             const status = getProductStatus(item);
@@ -243,6 +454,15 @@ export default function Dashboard() {
             );
           })}
         </div>
+        <CollectionFooter
+          page={productMeta?.page ?? stockPage}
+          totalPages={productMeta?.totalPages ?? 1}
+          total={productMeta?.total ?? products.length}
+          limit={stockLimit}
+          onPageChange={setStockPage}
+          onLimitChange={setStockLimit}
+          limitOptions={[5, 10, 20]}
+        />
       </div>
     </div>
   );

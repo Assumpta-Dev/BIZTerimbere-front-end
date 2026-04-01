@@ -15,6 +15,7 @@ const links = [
   { to: "/analytics", icon: RiBarChartBoxLine, label: "Analytics" },
   { to: "/reports", icon: RiFileTextLine, label: "Reports" },
   { to: "/settings", icon: RiSettingsLine, label: "Settings" },
+  { to: "/alerts", icon: RiBellLine, label: "Alerts" },
 ];
 
 export default function Sidebar() {
@@ -67,20 +68,13 @@ export default function Sidebar() {
           </NavLink>
         ))}
 
-        {/* Alerts link with badge */}
-        <NavLink
-          to="/dashboard"
-          className="flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium text-white/60 hover:text-white hover:bg-white/8 transition-all duration-150"
-          onClick={(e) => e.preventDefault()}
-        >
-          <RiBellLine className="text-lg shrink-0" />
-          <span className="flex-1">Alerts</span>
-          {unread > 0 && (
-            <span className="bg-rose-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center">
-              {unread > 99 ? "99+" : unread}
+        {unread > 0 && (
+          <div className="px-4 py-1">
+            <span className="bg-rose-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center inline-block">
+              {unread > 99 ? "99+" : unread} new alerts
             </span>
-          )}
-        </NavLink>
+          </div>
+        )}
       </nav>
 
       {/* User + Logout */}
