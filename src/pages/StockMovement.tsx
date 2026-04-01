@@ -4,7 +4,7 @@ import {
   RiInformationLine, RiAddLine, RiSubtractLine, RiCheckLine,
   RiArchiveDrawerLine, RiLoader4Line,
 } from "react-icons/ri";
-import { categoriesApi, productsApi, analyticsApi } from "../api/services";
+import { categoriesApi, productsApi, analyticsApi, salesApi } from "../api/services";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, Legend,
@@ -12,14 +12,12 @@ import {
 
 interface MovementEntry {
   id: string;
-  type: "in" | "out";
-  category: string;
-  product: string;
-  sku: string;
-  price: number;
+  type: "IN" | "OUT" | "ADJUSTMENT" | "SALE" | "RETURN";
+  reason?: string;
   quantity: number;
-  manufacturedDate: string;
-  expiryDate: string;
+  previousQty?: number;
+  newQty?: number;
+  createdAt: string;
 }
 
 export default function StockMovement() {
@@ -35,6 +33,7 @@ export default function StockMovement() {
   const [manufacturedDate, setManufacturedDate] = useState("");
   const [expiryDate, setExpiryDate] = useState("");
   const [log, setLog] = useState<MovementEntry[]>([]);
+  const [paymentMode, setPaymentMode] = useState<"CASH" | "MOBILE_MONEY" | "CARD" | "CREDIT">("CASH");
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState("");
@@ -65,8 +64,9 @@ export default function StockMovement() {
   // Load products when category changes
   useEffect(() => {
     if (!selectedCategoryId) return;
-    if (productsByCategory[selectedCategoryId]) {
-      const prods = productsByCategory[selectedCategoryId];
+    const cachedProducts = productsByCategory[selectedCategoryId];
+    if (cachedProducts) {
+      const prods = cachedProducts;
       if (prods.length > 0) setSelectedProductId(prods[0].id);
       return;
     }
@@ -76,16 +76,38 @@ export default function StockMovement() {
         setProductsByCategory((prev) => ({ ...prev, [selectedCategoryId]: prods }));
         if (prods.length > 0) setSelectedProductId(prods[0].id);
       }).catch(console.error);
-  }, [selectedCategoryId]);
+  }, [productsByCategory, selectedCategoryId]);
 
-  const currentProducts = productsByCategory[selectedCategoryId] ?? [];
+  const currentProducts = useMemo(
+    () => productsByCategory[selectedCategoryId] ?? [],
+    [productsByCategory, selectedCategoryId]
+  );
   const selectedProduct = useMemo(
     () => currentProducts.find((p: any) => p.id === selectedProductId) ?? currentProducts[0],
     [currentProducts, selectedProductId]
   );
 
-  const totalIn = log.filter((e) => e.type === "in").reduce((s, e) => s + e.quantity, 0);
-  const totalOut = log.filter((e) => e.type === "out").reduce((s, e) => s + e.quantity, 0);
+  // Load persistent movement history for selected product
+  useEffect(() => {
+    if (!selectedProduct?.id) {
+      setLog([]);
+      return;
+    }
+
+    productsApi.getStockLogs(selectedProduct.id)
+      .then((res) => {
+        const logs = (res.data.data ?? []) as MovementEntry[];
+        setLog(logs);
+      })
+      .catch(() => setLog([]));
+  }, [selectedProduct?.id]);
+
+  const totalIn = log
+    .filter((e) => e.type === "IN" || e.type === "RETURN")
+    .reduce((s, e) => s + e.quantity, 0);
+  const totalOut = log
+    .filter((e) => e.type === "OUT" || e.type === "SALE")
+    .reduce((s, e) => s + e.quantity, 0);
   const netFlow = totalIn - totalOut;
 
   const isReady = selectedProduct && quantity > 0 &&
@@ -96,33 +118,39 @@ export default function StockMovement() {
     setError("");
     setSubmitting(true);
     try {
-      await productsApi.adjustStock(
-        selectedProduct.id,
-        movementType === "in" ? "IN" : "OUT",
-        quantity,
-        `Manual ${movementType === "in" ? "stock in" : "stock out"} — ${selectedProduct.name}`
-      );
+      if (movementType === "out") {
+        await salesApi.create(
+          [{ productId: selectedProduct.id, quantity }],
+          paymentMode,
+          `Stock out from movement screen — ${selectedProduct.name}`
+        );
+      } else {
+        await productsApi.adjustStock(
+          selectedProduct.id,
+          "IN",
+          quantity,
+          `Manual stock in — ${selectedProduct.name}`
+        );
 
-      // If stock IN, also update product dates
-      if (movementType === "in" && (manufacturedDate || expiryDate)) {
-        await productsApi.update(selectedProduct.id, {
-          ...(manufacturedDate && { manufacturingDate: manufacturedDate }),
-          ...(expiryDate && { expiryDate }),
-        });
+        if (manufacturedDate || expiryDate) {
+          await productsApi.update(selectedProduct.id, {
+            ...(manufacturedDate && { manufacturingDate: manufacturedDate }),
+            ...(expiryDate && { expiryDate }),
+          });
+        }
       }
 
-      const entry: MovementEntry = {
-        id: String(Date.now()),
-        type: movementType,
-        category: categories.find((c) => c.id === selectedCategoryId)?.name ?? "",
-        product: selectedProduct.name,
-        sku: selectedProduct.sku ?? "—",
-        price: selectedProduct.sellingPrice,
-        quantity,
-        manufacturedDate,
-        expiryDate,
-      };
-      setLog((prev) => [entry, ...prev]);
+      const [productsRes, logsRes] = await Promise.all([
+        productsApi.getAll({ categoryId: selectedCategoryId, limit: 50 }),
+        productsApi.getStockLogs(selectedProduct.id),
+      ]);
+
+      setProductsByCategory((prev) => ({
+        ...prev,
+        [selectedCategoryId]: productsRes.data.data?.products ?? [],
+      }));
+      setLog((logsRes.data.data ?? []) as MovementEntry[]);
+
       setQuantity(1);
       setManufacturedDate("");
       setExpiryDate("");
@@ -330,6 +358,22 @@ export default function StockMovement() {
             </div>
           )}
 
+          {movementType === "out" && (
+            <div>
+              <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">Payment mode</p>
+              <select
+                value={paymentMode}
+                onChange={(e) => setPaymentMode(e.target.value as "CASH" | "MOBILE_MONEY" | "CARD" | "CREDIT")}
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-700 outline-none focus:border-[#0E514F] focus:ring-2 focus:ring-[#0E514F]/10 transition"
+              >
+                <option value="CASH">Cash</option>
+                <option value="MOBILE_MONEY">Mobile Money</option>
+                <option value="CARD">Card</option>
+                <option value="CREDIT">Credit</option>
+              </select>
+            </div>
+          )}
+
           {error && (
             <p className="text-xs text-rose-600 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2">{error}</p>
           )}
@@ -386,8 +430,8 @@ export default function StockMovement() {
         <div className="rounded-2xl border border-slate-100 bg-white shadow-sm overflow-hidden">
           <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#0E514F]/50">Session log</p>
-              <h2 className="text-xl font-bold text-slate-900 mt-0.5">Recorded movements</h2>
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#0E514F]/50">Movement log</p>
+              <h2 className="text-xl font-bold text-slate-900 mt-0.5">Recent product movements</h2>
             </div>
             <span className="text-xs font-semibold bg-[#FFF5B3] text-[#0E514F] px-3 py-1 rounded-full">
               {log.length} entries
@@ -397,7 +441,7 @@ export default function StockMovement() {
             <table className="min-w-full">
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-100">
-                  {["Type", "Product", "Category", "SKU", "Price", "Qty", "Total", "Mfg Date", "Expiry"].map((h) => (
+                  {["Type", "Reason", "Qty", "Previous", "New", "Recorded at"].map((h) => (
                     <th key={h} className="px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.15em] text-slate-400">{h}</th>
                   ))}
                 </tr>
@@ -407,24 +451,19 @@ export default function StockMovement() {
                   <tr key={entry.id} className="hover:bg-slate-50 transition-colors">
                     <td className="px-5 py-3.5">
                       <span className={`inline-flex items-center gap-1 text-xs font-bold px-2.5 py-1 rounded-full ${
-                        entry.type === "in"
+                        entry.type === "IN" || entry.type === "RETURN"
                           ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
                           : "bg-rose-50 text-rose-600 border border-rose-200"
                       }`}>
-                        {entry.type === "in" ? <RiArrowDownLine /> : <RiArrowUpLine />}
-                        {entry.type === "in" ? "IN" : "OUT"}
+                        {entry.type === "IN" || entry.type === "RETURN" ? <RiArrowDownLine /> : <RiArrowUpLine />}
+                        {entry.type}
                       </span>
                     </td>
-                    <td className="px-5 py-3.5 text-sm font-semibold text-slate-800">{entry.product}</td>
-                    <td className="px-5 py-3.5 text-sm text-slate-500">{entry.category}</td>
-                    <td className="px-5 py-3.5 text-xs text-slate-400 font-mono">{entry.sku}</td>
-                    <td className="px-5 py-3.5 text-sm text-slate-700">{entry.price.toLocaleString()} RWF</td>
+                    <td className="px-5 py-3.5 text-sm text-slate-600">{entry.reason || "Manual update"}</td>
                     <td className="px-5 py-3.5 text-sm font-bold text-slate-900">{entry.quantity}</td>
-                    <td className="px-5 py-3.5 text-sm font-semibold text-[#0E514F]">
-                      {(entry.price * entry.quantity).toLocaleString()} RWF
-                    </td>
-                    <td className="px-5 py-3.5 text-xs text-slate-400">{entry.manufacturedDate || "—"}</td>
-                    <td className="px-5 py-3.5 text-xs text-slate-400">{entry.expiryDate || "—"}</td>
+                    <td className="px-5 py-3.5 text-sm text-slate-500">{entry.previousQty ?? "—"}</td>
+                    <td className="px-5 py-3.5 text-sm text-slate-700 font-semibold">{entry.newQty ?? "—"}</td>
+                    <td className="px-5 py-3.5 text-xs text-slate-400">{new Date(entry.createdAt).toLocaleString()}</td>
                   </tr>
                 ))}
               </tbody>

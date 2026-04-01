@@ -9,14 +9,6 @@ import {
 const currency = (value: number) =>
   new Intl.NumberFormat("en-RW", { style: "currency", currency: "RWF", maximumFractionDigits: 0 }).format(value);
 
-const trendPeriods = [
-  { label: "24h", key: "urgency" },
-  { label: "Week", key: "urgency" },
-  { label: "Current", key: "current" },
-  { label: "Min floor", key: "min" },
-  { label: "Market avg", key: "ideal" },
-] as const;
-
 const priorityColor: Record<string, string> = {
   high: "bg-rose-50 text-rose-600 border border-rose-200",
   medium: "bg-amber-50 text-amber-700 border border-amber-200",

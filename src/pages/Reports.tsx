@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { analyticsApi } from "../api/services";
+import { analyticsApi, salesApi } from "../api/services";
 import { presentationSlides } from "../data/data";
 import {
   RiFileTextLine, RiPrinterLine, RiDownloadLine, RiCheckLine,
@@ -21,17 +21,48 @@ function Spinner() {
 export default function Reports() {
   const [profit, setProfit] = useState<any>(null);
   const [inventoryStatus, setInventoryStatus] = useState<any>(null);
+  const [sales, setSales] = useState<any[]>([]);
+  const [exporting, setExporting] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     Promise.all([
       analyticsApi.getProfitAnalysis("30d"),
       analyticsApi.getInventoryStatus(),
-    ]).then(([p, inv]) => {
+      salesApi.getAll({ page: 1, limit: 20 }),
+    ]).then(([p, inv, s]) => {
       setProfit(p.data.data);
       setInventoryStatus(inv.data.data);
+      setSales(s.data.data?.sales ?? []);
     }).catch(console.error).finally(() => setLoading(false));
   }, []);
+
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const generatedAt = new Date().toISOString();
+      const payload = {
+        generatedAt,
+        period: "30d",
+        profit,
+        inventoryStatus,
+        sales,
+      };
+
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      const dateStamp = generatedAt.slice(0, 10);
+      link.href = url;
+      link.download = `bizterimbere-report-${dateStamp}.json`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } finally {
+      setExporting(false);
+    }
+  };
 
   if (loading) return <Spinner />;
 
@@ -105,7 +136,11 @@ export default function Reports() {
               className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#0E514F] px-5 py-2.5 text-sm font-semibold text-white hover:opacity-90 transition">
               <RiPrinterLine /> Print summary
             </button>
-            <button className="inline-flex items-center justify-center gap-2 rounded-xl border border-[#0E514F]/15 bg-[#FFF5B3] px-5 py-2.5 text-sm font-semibold text-[#0E514F] hover:bg-[#fff08a] transition">
+            <button
+              onClick={handleExport}
+              disabled={exporting}
+              className="inline-flex items-center justify-center gap-2 rounded-xl border border-[#0E514F]/15 bg-[#FFF5B3] px-5 py-2.5 text-sm font-semibold text-[#0E514F] hover:bg-[#fff08a] transition disabled:opacity-60"
+            >
               <RiDownloadLine /> Export deck
             </button>
           </div>
@@ -245,6 +280,53 @@ export default function Reports() {
             </article>
           ))}
         </div>
+      </div>
+
+      <div className="rounded-2xl border border-slate-100 bg-white shadow-sm overflow-hidden">
+        <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#0E514F]/50">Transactions</p>
+            <h2 className="text-xl font-bold text-slate-900 mt-0.5">Recent sales activity</h2>
+          </div>
+          <span className="text-xs font-semibold bg-[#FFF5B3] text-[#0E514F] px-3 py-1 rounded-full">
+            {sales.length} records
+          </span>
+        </div>
+
+        {sales.length === 0 ? (
+          <p className="px-6 py-10 text-sm text-slate-400 text-center">No sales data found for this account yet.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="min-w-full">
+              <thead>
+                <tr className="bg-slate-50 border-b border-slate-100">
+                  {[
+                    "Date",
+                    "Items",
+                    "Payment",
+                    "Revenue",
+                    "Cost",
+                    "Profit",
+                  ].map((h) => (
+                    <th key={h} className="px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.15em] text-slate-400">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-50">
+                {sales.map((entry: any) => (
+                  <tr key={entry.id} className="hover:bg-slate-50 transition-colors">
+                    <td className="px-5 py-3.5 text-sm text-slate-600">{new Date(entry.createdAt).toLocaleString()}</td>
+                    <td className="px-5 py-3.5 text-sm text-slate-700 font-semibold">{entry.items?.length ?? 0}</td>
+                    <td className="px-5 py-3.5 text-xs text-slate-500">{(entry.paymentMode ?? "N/A").replace("_", " ")}</td>
+                    <td className="px-5 py-3.5 text-sm text-slate-700">{currency(entry.totalAmount ?? 0)}</td>
+                    <td className="px-5 py-3.5 text-sm text-slate-500">{currency(entry.totalCost ?? 0)}</td>
+                    <td className="px-5 py-3.5 text-sm font-semibold text-[#0E514F]">{currency(entry.profit ?? 0)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );
