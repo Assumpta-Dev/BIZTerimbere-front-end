@@ -1,7 +1,9 @@
 import axios from "axios";
 
+const BASE_URL = "https://bizterimbere-backend.onrender.com/api";
+
 const api = axios.create({
-  baseURL: process.env.REACT_APP_API_URL || "https://bizterimbere-backend.onrender.com/api",
+  baseURL: BASE_URL,
   headers: { "Content-Type": "application/json" },
   timeout: 30000,
 });
