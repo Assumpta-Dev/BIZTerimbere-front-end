@@ -1,16 +1,20 @@
 import axios from "axios";
 
-const BASE_URL = "https://bizterimbere-backend.onrender.com/api";
-
 const api = axios.create({
-  baseURL: BASE_URL,
-  headers: { "Content-Type": "application/json" },
+  baseURL: "https://bizterimbere-backend.onrender.com/api",
   timeout: 30000,
+  withCredentials: false,
 });
 
 api.interceptors.request.use((config) => {
+  // Always set Content-Type for requests with a body
+  if (config.method !== "get" && config.method !== "delete") {
+    config.headers["Content-Type"] = "application/json";
+  }
   const token = localStorage.getItem("token");
-  if (token) config.headers.Authorization = `Bearer ${token}`;
+  if (token) {
+    config.headers["Authorization"] = `Bearer ${token}`;
+  }
   return config;
 });
 
