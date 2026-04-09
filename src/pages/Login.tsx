@@ -31,7 +31,13 @@ export default function Login() {
       await login(email, password);
       navigate("/dashboard", { replace: true });
     } catch (err: any) {
-      setError(err?.response?.data?.message || "Invalid email or password.");
+      const msg = err?.response?.data?.message;
+      const errors = err?.response?.data?.errors;
+      if (errors?.length) {
+        setError(errors.map((e: any) => e.message).join(", "));
+      } else {
+        setError(msg || "Login failed. Please check your credentials.");
+      }
     } finally {
       setSubmitting(false);
     }
