@@ -33,8 +33,15 @@ export default function Register() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.name || !form.store || !form.email || !form.password) {
+    const normalizedName = form.name.trim();
+    const normalizedStore = form.store.trim();
+    const normalizedEmail = form.email.trim();
+
+    if (!normalizedName || !normalizedStore || !normalizedEmail || !form.password) {
       setError("Please fill in all fields."); return;
+    }
+    if (!/\S+@\S+\.\S+/.test(normalizedEmail)) {
+      setError("Please enter a valid email address."); return;
     }
     if (form.password.length < 6) {
       setError("Password must be at least 6 characters."); return;
@@ -42,10 +49,16 @@ export default function Register() {
     setError("");
     setSubmitting(true);
     try {
-      await register(form.name, form.store, form.email, form.password);
+      await register(normalizedName, normalizedStore, normalizedEmail, form.password);
       navigate("/dashboard", { replace: true });
     } catch (err: any) {
-      setError(err?.response?.data?.message || "Registration failed. Please try again.");
+      const msg = err?.response?.data?.message;
+      const errors = err?.response?.data?.errors;
+      if (errors?.length) {
+        setError(errors.map((entry: any) => entry.message).join(", "));
+      } else {
+        setError(msg || "Registration failed. Please try again.");
+      }
     } finally {
       setSubmitting(false);
     }

@@ -24,11 +24,14 @@ export default function Login() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email || !password) { setError("Please fill in all fields."); return; }
+    const normalizedEmail = email.trim();
+
+    if (!normalizedEmail || !password) { setError("Please fill in all fields."); return; }
+    if (!/\S+@\S+\.\S+/.test(normalizedEmail)) { setError("Please enter a valid email address."); return; }
     setError("");
     setSubmitting(true);
     try {
-      await login(email, password);
+      await login(normalizedEmail, password);
       navigate("/dashboard", { replace: true });
     } catch (err: any) {
       const msg = err?.response?.data?.message;
