@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import {
   RiLeafLine,
@@ -21,9 +21,11 @@ const perks = [
 ];
 
 export default function Register() {
-  const { register, loading } = useAuth();
+  const navigate = useNavigate();
+  const { register } = useAuth();
   const [form, setForm] = useState({ name: "", store: "", email: "", password: "" });
   const [showPassword, setShowPassword] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
   const set = (key: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) =>
@@ -38,11 +40,14 @@ export default function Register() {
       setError("Password must be at least 6 characters."); return;
     }
     setError("");
+    setSubmitting(true);
     try {
       await register(form.name, form.store, form.email, form.password);
-      // App.tsx watches token state and redirects automatically
+      navigate("/dashboard", { replace: true });
     } catch (err: any) {
       setError(err?.response?.data?.message || "Registration failed. Please try again.");
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -224,10 +229,10 @@ export default function Register() {
             {/* Submit */}
             <button
               type="submit"
-              disabled={loading}
+              disabled={submitting}
               className="w-full flex items-center justify-center gap-2 bg-[#0E514F] text-white text-sm font-bold py-3 rounded-xl hover:opacity-90 transition disabled:opacity-60 mt-2"
             >
-              {loading ? (
+              {submitting ? (
                 <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
               ) : (
                 <><RiArrowRightLine /> Create account &amp; go to dashboard</>

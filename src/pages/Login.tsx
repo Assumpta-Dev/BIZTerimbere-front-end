@@ -1,16 +1,10 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import {
-  RiLeafLine,
-  RiMailLine,
-  RiLockLine,
-  RiEyeLine,
-  RiEyeOffLine,
-  RiArrowRightLine,
-  RiShieldCheckLine,
-  RiTimeLine,
-  RiBarChartBoxLine,
+  RiLeafLine, RiMailLine, RiLockLine,
+  RiEyeLine, RiEyeOffLine, RiArrowRightLine,
+  RiShieldCheckLine, RiTimeLine, RiBarChartBoxLine,
 } from "react-icons/ri";
 
 const highlights = [
@@ -20,33 +14,35 @@ const highlights = [
 ];
 
 export default function Login() {
-  const { login, loading } = useAuth();
+  const navigate = useNavigate();
+  const { login } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email || !password) { setError("Please fill in all fields."); return; }
     setError("");
+    setSubmitting(true);
     try {
       await login(email, password);
-      // App.tsx watches token state and redirects automatically
+      navigate("/dashboard", { replace: true });
     } catch (err: any) {
       setError(err?.response?.data?.message || "Invalid email or password.");
+    } finally {
+      setSubmitting(false);
     }
   };
 
   return (
     <div className="min-h-screen bg-[#FFFFFE] flex">
-
       {/* Left panel */}
       <div className="hidden lg:flex lg:w-[44%] bg-[#0E514F] flex-col justify-between p-10 relative overflow-hidden">
         <div className="absolute inset-0 pointer-events-none opacity-10"
           style={{ backgroundImage: "radial-gradient(circle at 10% 80%, #FFF5B3 0%, transparent 55%)" }} />
-
-        {/* Brand */}
         <div className="flex items-center gap-3 relative">
           <div className="w-9 h-9 rounded-xl bg-[#FFF5B3] flex items-center justify-center">
             <RiLeafLine className="text-[#0E514F] text-lg" />
@@ -56,8 +52,6 @@ export default function Login() {
             <p className="text-white/40 text-[11px]">Inventory Platform</p>
           </div>
         </div>
-
-        {/* Main copy */}
         <div className="relative space-y-6">
           <div>
             <p className="text-xs font-bold uppercase tracking-[0.2em] text-white/40 mb-3">Welcome back</p>
@@ -68,7 +62,6 @@ export default function Login() {
               Sign in to see live stock levels, expiry alerts, and pricing recommendations waiting for you.
             </p>
           </div>
-
           <div className="space-y-3">
             {highlights.map((h) => (
               <div key={h.text} className="flex items-center gap-3 text-sm text-white/70">
@@ -80,16 +73,11 @@ export default function Login() {
             ))}
           </div>
         </div>
-
-        {/* Bottom note */}
-        <p className="text-xs text-white/30 relative">
-          Decision support for businesses in Rwanda and beyond.
-        </p>
+        <p className="text-xs text-white/30 relative">Decision support for businesses in Rwanda and beyond.</p>
       </div>
 
-      {/* Right panel — form */}
+      {/* Right panel */}
       <div className="flex-1 flex flex-col items-center justify-center px-6 py-12">
-        {/* Mobile brand */}
         <div className="flex items-center gap-2 mb-8 lg:hidden">
           <div className="w-8 h-8 rounded-lg bg-[#0E514F] flex items-center justify-center">
             <RiLeafLine className="text-[#FFF5B3] text-base" />
@@ -102,14 +90,11 @@ export default function Login() {
             <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Sign in</h1>
             <p className="text-sm text-slate-400 mt-1">
               Don't have an account?{" "}
-              <Link to="/register" className="text-[#0E514F] font-semibold hover:underline">
-                Create one
-              </Link>
+              <Link to="/register" className="text-[#0E514F] font-semibold hover:underline">Create one</Link>
             </p>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
-            {/* Email */}
             <div>
               <label className="block text-xs font-semibold uppercase tracking-wide text-slate-400 mb-1.5">
                 Email address
@@ -126,12 +111,9 @@ export default function Login() {
               </div>
             </div>
 
-            {/* Password */}
             <div>
               <div className="flex items-center justify-between mb-1.5">
-                <label className="block text-xs font-semibold uppercase tracking-wide text-slate-400">
-                  Password
-                </label>
+                <label className="block text-xs font-semibold uppercase tracking-wide text-slate-400">Password</label>
                 <button type="button" className="text-xs text-[#0E514F] font-semibold hover:underline">
                   Forgot password?
                 </button>
@@ -155,20 +137,18 @@ export default function Login() {
               </div>
             </div>
 
-            {/* Error */}
             {error && (
               <p className="text-xs text-rose-600 font-medium bg-rose-50 border border-rose-200 rounded-lg px-3 py-2">
                 {error}
               </p>
             )}
 
-            {/* Submit */}
             <button
               type="submit"
-              disabled={loading}
+              disabled={submitting}
               className="w-full flex items-center justify-center gap-2 bg-[#0E514F] text-white text-sm font-bold py-3 rounded-xl hover:opacity-90 transition disabled:opacity-60 mt-2"
             >
-              {loading ? (
+              {submitting ? (
                 <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
               ) : (
                 <><RiArrowRightLine /> Sign in to dashboard</>

@@ -22,30 +22,18 @@ const AuthContext = createContext<AuthContextType | null>(null);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(() => {
-    try {
-      const stored = localStorage.getItem("user");
-      return stored ? JSON.parse(stored) : null;
-    } catch {
-      return null;
-    }
+    try { return JSON.parse(localStorage.getItem("user") || "null"); } catch { return null; }
   });
   const [token, setToken] = useState<string | null>(() => localStorage.getItem("token"));
-  // Start true if there's a stored token — we need to validate it first
-  const [loading, setLoading] = useState<boolean>(() => !!localStorage.getItem("token"));
+  const [loading, setLoading] = useState(true);
 
-  // Validate stored token on mount
   useEffect(() => {
-    const storedToken = localStorage.getItem("token");
-    if (!storedToken) {
-      setLoading(false);
-      return;
-    }
+    const stored = localStorage.getItem("token");
+    if (!stored) { setLoading(false); return; }
     authApi.getProfile()
       .then((res) => {
-        const u = res.data.data;
-        setUser(u);
-        setToken(storedToken);
-        localStorage.setItem("user", JSON.stringify(u));
+        setUser(res.data.data);
+        localStorage.setItem("user", JSON.stringify(res.data.data));
       })
       .catch(() => {
         localStorage.removeItem("token");
@@ -61,22 +49,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const { token: jwt, user: u } = res.data.data;
     localStorage.setItem("token", jwt);
     localStorage.setItem("user", JSON.stringify(u));
-    setToken(jwt);
     setUser(u);
+    setToken(jwt);
   }, []);
 
-  const register = useCallback(async (
-    name: string,
-    businessName: string,
-    email: string,
-    password: string
-  ) => {
+  const register = useCallback(async (name: string, businessName: string, email: string, password: string) => {
     const res = await authApi.register(name, businessName, email, password);
     const { token: jwt, user: u } = res.data.data;
     localStorage.setItem("token", jwt);
     localStorage.setItem("user", JSON.stringify(u));
-    setToken(jwt);
     setUser(u);
+    setToken(jwt);
   }, []);
 
   const logout = useCallback(() => {
@@ -104,12 +87,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
 export function useAuth(): AuthContextType {
   const ctx = useContext(AuthContext);
-  if (!ctx) {
-    return {
-      user: null, token: null, loading: false,
-      login: async () => {}, register: async () => {},
-      logout: () => {}, updateUser: () => {},
-    };
-  }
+  if (!ctx) throw new Error("useAuth must be used inside AuthProvider");
   return ctx;
 }
